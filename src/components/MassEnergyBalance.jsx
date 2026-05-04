@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, ArrowRight, Zap, Droplets, Flame, Wind, Activity } from 'lucide-react';
+import { X, ArrowRight, Zap, Droplets, Flame, Wind, Activity, Gauge, Thermometer } from 'lucide-react';
 import SankeyDiagram from './SankeyDiagram';
 
 export default function MassEnergyBalance({ plantData, selectedEquipment, onClose }) {
@@ -7,12 +7,39 @@ export default function MassEnergyBalance({ plantData, selectedEquipment, onClos
 
   if (!plantData) return null;
 
-  const { massBalance, energyBalance, production, equipment } = plantData;
+  const { massBalance, energyBalance, production, equipment, physics } = plantData;
 
   const formatNumber = (num) => {
-    if (num >= 1000000) return (num / 1000000).toFixed(2) + 'M';
-    if (num >= 1000) return (num / 1000).toFixed(1) + 'k';
-    return num?.toLocaleString() || '—';
+    if (num === undefined || num === null) return '—';
+    if (Math.abs(num) >= 1000000) return (num / 1000000).toFixed(2) + 'M';
+    if (Math.abs(num) >= 1000) return (num / 1000).toFixed(1) + 'k';
+    return num.toLocaleString();
+  };
+
+  const getStreamData = (eq) => {
+    const streams = eq.streams;
+    if (!streams) return { massIn: 0, massOut: 0, enthalpyIn: 0, enthalpyOut: 0 };
+
+    let massIn = 0, massOut = 0, enthalpyIn = 0, enthalpyOut = 0;
+
+    if (streams.inlet?.mass_kg_h) massIn = streams.inlet.mass_kg_h;
+    if (streams.cold_inlet?.mass_kg_h) massIn = streams.cold_inlet.mass_kg_h;
+
+    if (streams.outlet_liquid?.mass_kg_h) massOut += streams.outlet_liquid.mass_kg_h;
+    if (streams.outlet_vapor?.mass_kg_h) massOut += streams.outlet_vapor.mass_kg_h;
+    if (streams.outlet?.mass_kg_h) massOut = streams.outlet.mass_kg_h;
+    if (streams.outlet_product?.mass_kg_h) massOut = streams.outlet_product.mass_kg_h;
+    if (streams.outlet_power?.power_kW) massOut = streams.outlet_power.power_kW;
+    if (streams.cold_outlet?.mass_kg_h) massOut = streams.cold_outlet.mass_kg_h;
+
+    if (streams.enthalpy) {
+      enthalpyIn = streams.enthalpy.inlet_MJ_h || streams.enthalpy.fuel_MJ_h || streams.enthalpy.cold_side_MJ_h || 0;
+      enthalpyOut = streams.enthalpy.outlet_MJ_h ||
+        ((streams.enthalpy.electrical_MJ_h || 0) + (streams.enthalpy.thermal_MJ_h || 0)) ||
+        streams.enthalpy.hot_side_MJ_h || 0;
+    }
+
+    return { massIn, massOut, enthalpyIn, enthalpyOut };
   };
 
   return (
@@ -26,7 +53,7 @@ export default function MassEnergyBalance({ plantData, selectedEquipment, onClos
             <div>
               <h2 className="text-lg font-semibold text-white">Mass & Energy Balance</h2>
               <p className="text-xs text-[#6b7280]">
-                {plantData.inputs.capacity} TPD • {plantData.inputs.feedstock}
+                {plantData.inputs.capacity} TPD • {plantData.inputs.feedstock} • {plantData.inputs.location}
               </p>
             </div>
           </div>
@@ -35,8 +62,9 @@ export default function MassEnergyBalance({ plantData, selectedEquipment, onClos
             <div className="flex bg-[#0a0a0f] rounded-xl p-1">
               {[
                 { id: 'sankey', label: 'Flow Diagram' },
-                { id: 'table', label: 'Data Table' },
+                { id: 'table', label: 'Stream Table' },
                 { id: 'energy', label: 'Energy Balance' },
+                { id: 'parasitic', label: 'Parasitic Loads' },
               ].map((tab) => (
                 <button
                   key={tab.id}
@@ -64,29 +92,35 @@ export default function MassEnergyBalance({ plantData, selectedEquipment, onClos
         <div className="flex-1 p-6 overflow-auto">
           {activeTab === 'sankey' && (
             <div className="h-full flex flex-col">
-              <div className="grid grid-cols-4 gap-4 mb-6">
+              <div className="grid grid-cols-5 gap-4 mb-6">
                 <SummaryCard
                   icon={<Droplets className="w-4 h-4" />}
-                  label="Feedstock Input"
-                  value={`${formatNumber(production.hourlyFeedRate)} kg/h`}
+                  label="Feed Rate"
+                  value={`${formatNumber(physics?.mass?.feedIn)} kg/h`}
                   color="#DAA520"
                 />
                 <SummaryCard
                   icon={<Wind className="w-4 h-4" />}
-                  label="Daily Biogas"
-                  value={`${formatNumber(production.dailyBiogas)} m³/d`}
+                  label="Biogas"
+                  value={`${formatNumber(physics?.volume?.biogasOut)} m³/h`}
                   color="#00ff88"
                 />
                 <SummaryCard
                   icon={<Flame className="w-4 h-4" />}
-                  label="Daily Methane"
-                  value={`${formatNumber(production.dailyMethane)} m³/d`}
+                  label="Biomethane"
+                  value={`${formatNumber(physics?.volume?.biomethaneRNG)} m³/h`}
                   color="#ff8800"
                 />
                 <SummaryCard
                   icon={<Zap className="w-4 h-4" />}
-                  label="System Efficiency"
-                  value={`${energyBalance.efficiency}%`}
+                  label="Net Power"
+                  value={`${formatNumber(physics?.energy?.netPowerExport_kW)} kW`}
+                  color="#ffcc00"
+                />
+                <SummaryCard
+                  icon={<Gauge className="w-4 h-4" />}
+                  label="Efficiency"
+                  value={`${energyBalance?.efficiency || 0}%`}
                   color="#8b5cf6"
                 />
               </div>
@@ -100,7 +134,7 @@ export default function MassEnergyBalance({ plantData, selectedEquipment, onClos
             <div className="space-y-6">
               <div className="bg-[#0a0a0f] rounded-xl border border-[#2a2a38] overflow-hidden">
                 <div className="px-4 py-3 border-b border-[#2a2a38] bg-[#1a1a24]">
-                  <h3 className="font-medium text-white">Equipment Stream Data</h3>
+                  <h3 className="font-medium text-white">Equipment Stream Summary</h3>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full">
@@ -116,10 +150,10 @@ export default function MassEnergyBalance({ plantData, selectedEquipment, onClos
                           Mass Out (kg/h)
                         </th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-[#6b7280] uppercase tracking-wider">
-                          Enthalpy In (MJ/h)
+                          H In (MJ/h)
                         </th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-[#6b7280] uppercase tracking-wider">
-                          Enthalpy Out (MJ/h)
+                          H Out (MJ/h)
                         </th>
                         <th className="px-4 py-3 text-right text-xs font-medium text-[#6b7280] uppercase tracking-wider">
                           ΔH (MJ/h)
@@ -129,9 +163,8 @@ export default function MassEnergyBalance({ plantData, selectedEquipment, onClos
                     <tbody>
                       {equipment.map((eq, i) => {
                         const isSelected = selectedEquipment?.id === eq.id;
-                        const massIn = eq.streams.massIn || eq.streams.coldIn || eq.streams.biogasIn || 0;
-                        const massOut = eq.streams.massOut || eq.streams.coldOut || eq.streams.biomethaneOut || eq.streams.powerOut || 0;
-                        const deltaH = eq.streams.enthalpyOut - eq.streams.enthalpyIn;
+                        const { massIn, massOut, enthalpyIn, enthalpyOut } = getStreamData(eq);
+                        const deltaH = enthalpyOut - enthalpyIn;
 
                         return (
                           <tr
@@ -157,10 +190,10 @@ export default function MassEnergyBalance({ plantData, selectedEquipment, onClos
                               {formatNumber(massOut)}
                             </td>
                             <td className="px-4 py-3 text-right font-mono text-sm text-[#ff8800]">
-                              {formatNumber(eq.streams.enthalpyIn)}
+                              {formatNumber(enthalpyIn)}
                             </td>
                             <td className="px-4 py-3 text-right font-mono text-sm text-[#8b5cf6]">
-                              {formatNumber(eq.streams.enthalpyOut)}
+                              {formatNumber(enthalpyOut)}
                             </td>
                             <td
                               className={`px-4 py-3 text-right font-mono text-sm ${
@@ -178,27 +211,40 @@ export default function MassEnergyBalance({ plantData, selectedEquipment, onClos
                 </div>
               </div>
 
+              {/* Global Mass Balance */}
               <div className="grid grid-cols-2 gap-6">
                 <div className="bg-[#0a0a0f] rounded-xl border border-[#2a2a38] p-4">
-                  <h4 className="text-sm font-medium text-white mb-4">Mass Balance Summary</h4>
+                  <h4 className="text-sm font-medium text-white mb-4">Mass Balance (kg/h)</h4>
                   <div className="space-y-3">
-                    <BalanceRow label="Total Feedstock Input" value={production.hourlyFeedRate * 24} unit="kg/day" />
-                    <BalanceRow label="Biogas Generated" value={production.dailyBiogas * 1.2} unit="kg/day" />
-                    <BalanceRow label="Digestate Output" value={production.hourlyFeedRate * 24 * 0.92} unit="kg/day" />
+                    <BalanceRow label="Feedstock Input" value={physics?.mass?.feedIn} unit="kg/h" />
+                    <BalanceRow label="Biogas Output" value={physics?.mass?.biogasOut} unit="kg/h" />
+                    <BalanceRow label="Digestate Output" value={physics?.mass?.digestateOut} unit="kg/h" />
+                    <BalanceRow label="Water Loss" value={physics?.mass?.waterLoss} unit="kg/h" />
                     <div className="pt-3 border-t border-[#2a2a38]">
-                      <BalanceRow label="Mass Closure" value={99.2} unit="%" highlight />
+                      <BalanceRow
+                        label="Mass Closure"
+                        value={((physics?.mass?.biogasOut + physics?.mass?.digestateOut + physics?.mass?.waterLoss) / physics?.mass?.feedIn * 100).toFixed(1)}
+                        unit="%"
+                        highlight
+                      />
                     </div>
                   </div>
                 </div>
 
                 <div className="bg-[#0a0a0f] rounded-xl border border-[#2a2a38] p-4">
-                  <h4 className="text-sm font-medium text-white mb-4">Global Plant Totals</h4>
+                  <h4 className="text-sm font-medium text-white mb-4">Volumetric Flows (m³/h)</h4>
                   <div className="space-y-3">
-                    <BalanceRow label="Annual Biogas Production" value={production.dailyBiogas * 365} unit="m³/yr" />
-                    <BalanceRow label="Annual Methane Production" value={production.annualMethane} unit="m³/yr" />
-                    <BalanceRow label="Annual CO2 Avoided" value={production.annualMethane * 0.002} unit="tons/yr" />
+                    <BalanceRow label="Raw Biogas" value={physics?.volume?.biogasOut} unit="m³/h" />
+                    <BalanceRow label="Methane Content" value={physics?.volume?.methaneOut} unit="m³/h" />
+                    <BalanceRow label="Biomethane (RNG)" value={physics?.volume?.biomethaneRNG} unit="m³/h" />
+                    <BalanceRow label="CO2 Rejected" value={physics?.volume?.co2Rejected} unit="m³/h" />
                     <div className="pt-3 border-t border-[#2a2a38]">
-                      <BalanceRow label="Methane Content" value={55} unit="%" highlight />
+                      <BalanceRow
+                        label="CH4 Recovery"
+                        value={((physics?.volume?.biomethaneRNG / physics?.volume?.methaneOut) * 100).toFixed(1)}
+                        unit="%"
+                        highlight
+                      />
                     </div>
                   </div>
                 </div>
@@ -212,19 +258,19 @@ export default function MassEnergyBalance({ plantData, selectedEquipment, onClos
                 <div className="bg-[#0a0a0f] rounded-xl border border-[#2a2a38] p-6">
                   <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
                     <ArrowRight className="w-5 h-5 text-[#00d4ff]" />
-                    Energy Inputs
+                    Energy Inputs (MJ/day)
                   </h3>
                   <div className="space-y-4">
                     <EnergyBar
                       label="Feedstock Chemical Energy"
-                      value={energyBalance.inputs.feedstock}
-                      max={energyBalance.inputs.feedstock}
+                      value={energyBalance?.inputs?.feedstock_MJ_d}
+                      max={energyBalance?.inputs?.feedstock_MJ_d}
                       color="#DAA520"
                     />
                     <EnergyBar
                       label="Parasitic Electricity"
-                      value={energyBalance.inputs.electricity}
-                      max={energyBalance.inputs.feedstock}
+                      value={energyBalance?.inputs?.parasitic_MJ_d}
+                      max={energyBalance?.inputs?.feedstock_MJ_d}
                       color="#8b5cf6"
                     />
                     <div className="pt-4 border-t border-[#2a2a38]">
@@ -232,9 +278,9 @@ export default function MassEnergyBalance({ plantData, selectedEquipment, onClos
                         <span className="text-sm text-[#6b7280]">Total Input Energy</span>
                         <span className="text-lg font-bold text-white">
                           {formatNumber(
-                            energyBalance.inputs.feedstock + energyBalance.inputs.electricity
-                          )}{' '}
-                          MJ/d
+                            (energyBalance?.inputs?.feedstock_MJ_d || 0) +
+                            (energyBalance?.inputs?.parasitic_MJ_d || 0)
+                          )} MJ/d
                         </span>
                       </div>
                     </div>
@@ -244,31 +290,31 @@ export default function MassEnergyBalance({ plantData, selectedEquipment, onClos
                 <div className="bg-[#0a0a0f] rounded-xl border border-[#2a2a38] p-6">
                   <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
                     <ArrowRight className="w-5 h-5 text-[#00ff88] rotate-180" />
-                    Energy Outputs
+                    Energy Outputs (MJ/day)
                   </h3>
                   <div className="space-y-4">
                     <EnergyBar
                       label="Biomethane Energy"
-                      value={energyBalance.outputs.biomethane}
-                      max={energyBalance.inputs.feedstock}
+                      value={energyBalance?.outputs?.biomethane_MJ_d}
+                      max={energyBalance?.inputs?.feedstock_MJ_d}
                       color="#00ff88"
                     />
                     <EnergyBar
-                      label="Electricity Generated"
-                      value={energyBalance.outputs.electricity}
-                      max={energyBalance.inputs.feedstock}
+                      label="Net Electricity Export"
+                      value={energyBalance?.outputs?.electricity_MJ_d}
+                      max={energyBalance?.inputs?.feedstock_MJ_d}
                       color="#ffcc00"
                     />
                     <EnergyBar
-                      label="Recovered Heat"
-                      value={energyBalance.outputs.heat}
-                      max={energyBalance.inputs.feedstock}
+                      label="Useful Heat"
+                      value={energyBalance?.outputs?.heat_useful_MJ_d}
+                      max={energyBalance?.inputs?.feedstock_MJ_d}
                       color="#ff8800"
                     />
                     <EnergyBar
                       label="Losses"
-                      value={energyBalance.outputs.losses}
-                      max={energyBalance.inputs.feedstock}
+                      value={energyBalance?.outputs?.losses_MJ_d}
+                      max={energyBalance?.inputs?.feedstock_MJ_d}
                       color="#ff4444"
                     />
                     <div className="pt-4 border-t border-[#2a2a38]">
@@ -276,12 +322,11 @@ export default function MassEnergyBalance({ plantData, selectedEquipment, onClos
                         <span className="text-sm text-[#6b7280]">Total Output Energy</span>
                         <span className="text-lg font-bold text-white">
                           {formatNumber(
-                            energyBalance.outputs.biomethane +
-                              energyBalance.outputs.electricity +
-                              energyBalance.outputs.heat +
-                              energyBalance.outputs.losses
-                          )}{' '}
-                          MJ/d
+                            (energyBalance?.outputs?.biomethane_MJ_d || 0) +
+                            (energyBalance?.outputs?.electricity_MJ_d || 0) +
+                            (energyBalance?.outputs?.heat_useful_MJ_d || 0) +
+                            (energyBalance?.outputs?.losses_MJ_d || 0)
+                          )} MJ/d
                         </span>
                       </div>
                     </div>
@@ -294,19 +339,114 @@ export default function MassEnergyBalance({ plantData, selectedEquipment, onClos
                   <div>
                     <h4 className="text-lg font-semibold text-white mb-1">Overall Energy Efficiency</h4>
                     <p className="text-sm text-[#6b7280]">
-                      Ratio of useful energy outputs to total energy inputs
+                      (Biomethane + Electricity + Useful Heat) / Feedstock Energy
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="text-4xl font-bold text-[#00ff88]">{energyBalance.efficiency}%</p>
+                    <p className="text-4xl font-bold text-[#00ff88]">{energyBalance?.efficiency || 0}%</p>
                     <p className="text-sm text-[#6b7280]">Industry benchmark: 75-85%</p>
                   </div>
                 </div>
                 <div className="mt-4 h-3 bg-[#1a1a24] rounded-full overflow-hidden">
                   <div
                     className="h-full bg-gradient-to-r from-[#00ff88] to-[#00d4ff] rounded-full"
-                    style={{ width: `${energyBalance.efficiency}%` }}
+                    style={{ width: `${energyBalance?.efficiency || 0}%` }}
                   />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'parasitic' && physics?.parasiticLoads && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-3 gap-4">
+                <div className="bg-[#0a0a0f] rounded-xl border border-[#2a2a38] p-4 text-center">
+                  <Zap className="w-6 h-6 text-[#ffcc00] mx-auto mb-2" />
+                  <p className="text-2xl font-bold text-white">{formatNumber(physics.energy?.chpElectrical_kW)} kW</p>
+                  <p className="text-xs text-[#6b7280]">Gross Generation</p>
+                </div>
+                <div className="bg-[#0a0a0f] rounded-xl border border-[#2a2a38] p-4 text-center">
+                  <Gauge className="w-6 h-6 text-[#ff4444] mx-auto mb-2" />
+                  <p className="text-2xl font-bold text-white">{formatNumber(physics.parasiticLoads.total)} kW</p>
+                  <p className="text-xs text-[#6b7280]">Parasitic Load</p>
+                </div>
+                <div className="bg-[#0a0a0f] rounded-xl border border-[#2a2a38] p-4 text-center">
+                  <Zap className="w-6 h-6 text-[#00ff88] mx-auto mb-2" />
+                  <p className="text-2xl font-bold text-[#00ff88]">{formatNumber(physics.energy?.netPowerExport_kW)} kW</p>
+                  <p className="text-xs text-[#6b7280]">Net Export</p>
+                </div>
+              </div>
+
+              <div className="bg-[#0a0a0f] rounded-xl border border-[#2a2a38] p-6">
+                <h3 className="text-lg font-semibold text-white mb-4">Parasitic Load Breakdown</h3>
+                <div className="space-y-4">
+                  <ParasiticBar
+                    label="Digester Mixing"
+                    value={physics.parasiticLoads.digester_mixing}
+                    total={physics.parasiticLoads.total}
+                    color="#00d4ff"
+                  />
+                  <ParasiticBar
+                    label="Pumping"
+                    value={physics.parasiticLoads.pumping}
+                    total={physics.parasiticLoads.total}
+                    color="#8b5cf6"
+                  />
+                  <ParasiticBar
+                    label="Gas Upgrading"
+                    value={physics.parasiticLoads.upgrader}
+                    total={physics.parasiticLoads.total}
+                    color="#00ff88"
+                  />
+                  <ParasiticBar
+                    label="Cooling System"
+                    value={physics.parasiticLoads.cooling}
+                    total={physics.parasiticLoads.total}
+                    color="#ff8800"
+                  />
+                  <ParasiticBar
+                    label="Auxiliary Systems"
+                    value={physics.parasiticLoads.auxiliary}
+                    total={physics.parasiticLoads.total}
+                    color="#6b7280"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-6">
+                <div className="bg-[#0a0a0f] rounded-xl border border-[#2a2a38] p-4">
+                  <h4 className="text-sm font-medium text-white mb-4">CHP Performance</h4>
+                  <div className="space-y-3">
+                    <BalanceRow label="Fuel Input" value={physics.energy?.chpFuelInput_kW} unit="kW" />
+                    <BalanceRow label="Electrical Output" value={physics.energy?.chpElectrical_kW} unit="kW" />
+                    <BalanceRow label="Thermal Output" value={physics.energy?.chpThermal_kW} unit="kW" />
+                    <div className="pt-3 border-t border-[#2a2a38]">
+                      <BalanceRow
+                        label="Parasitic Fraction"
+                        value={((physics.parasiticLoads.total / physics.energy?.chpElectrical_kW) * 100).toFixed(1)}
+                        unit="%"
+                        highlight
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-[#0a0a0f] rounded-xl border border-[#2a2a38] p-4">
+                  <h4 className="text-sm font-medium text-white mb-4">Heat Integration</h4>
+                  <div className="space-y-3">
+                    <BalanceRow label="CHP Heat Available" value={physics.energy?.chpThermal_kW} unit="kW" />
+                    <BalanceRow label="Process Heat Demand" value={physics.energy?.totalHeatDemand_kW} unit="kW" />
+                    <BalanceRow label="Heating Duty" value={physics.energy?.heatingDuty_kW} unit="kW" />
+                    <BalanceRow label="Heat Losses" value={physics.energy?.heatLoss_kW} unit="kW" />
+                    <div className="pt-3 border-t border-[#2a2a38]">
+                      <BalanceRow
+                        label="Heat Recovery"
+                        value={((physics.energy?.totalHeatDemand_kW / physics.energy?.chpThermal_kW) * 100).toFixed(1)}
+                        unit="%"
+                        highlight
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -333,38 +473,67 @@ function SummaryCard({ icon, label, value, color }) {
 }
 
 function BalanceRow({ label, value, unit, highlight }) {
+  const formatNumber = (num) => {
+    if (num === undefined || num === null) return '—';
+    if (Math.abs(num) >= 1000000) return (num / 1000000).toFixed(2) + 'M';
+    if (Math.abs(num) >= 1000) return (num / 1000).toFixed(1) + 'k';
+    return num.toLocaleString(undefined, { maximumFractionDigits: 1 });
+  };
+
   return (
     <div className="flex items-center justify-between">
       <span className={`text-sm ${highlight ? 'text-white font-medium' : 'text-[#6b7280]'}`}>
         {label}
       </span>
       <span className={`font-mono text-sm ${highlight ? 'text-[#00ff88] font-bold' : 'text-white'}`}>
-        {typeof value === 'number' ? value.toLocaleString(undefined, { maximumFractionDigits: 1 }) : value} {unit}
+        {formatNumber(value)} {unit}
       </span>
     </div>
   );
 }
 
 function EnergyBar({ label, value, max, color }) {
-  const percentage = (value / max) * 100;
+  const percentage = max > 0 ? (value / max) * 100 : 0;
+
+  const formatNumber = (num) => {
+    if (num === undefined || num === null) return '—';
+    if (Math.abs(num) >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+    if (Math.abs(num) >= 1000) return (num / 1000).toFixed(0) + 'k';
+    return num.toLocaleString();
+  };
+
+  return (
+    <div>
+      <div className="flex justify-between items-center mb-1">
+        <span className="text-sm text-[#9ca3af]">{label}</span>
+        <span className="font-mono text-sm text-white">{formatNumber(value)} MJ/d</span>
+      </div>
+      <div className="h-2 bg-[#1a1a24] rounded-full overflow-hidden">
+        <div
+          className="h-full rounded-full transition-all duration-500"
+          style={{ width: `${Math.min(percentage, 100)}%`, background: color }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ParasiticBar({ label, value, total, color }) {
+  const percentage = total > 0 ? (value / total) * 100 : 0;
 
   return (
     <div>
       <div className="flex justify-between items-center mb-1">
         <span className="text-sm text-[#9ca3af]">{label}</span>
         <span className="font-mono text-sm text-white">
-          {value >= 1000000
-            ? (value / 1000000).toFixed(1) + 'M'
-            : value >= 1000
-            ? (value / 1000).toFixed(0) + 'k'
-            : value.toLocaleString()}{' '}
-          MJ/d
+          {value?.toLocaleString() || 0} kW
+          <span className="text-[#6b7280] ml-1">({percentage.toFixed(0)}%)</span>
         </span>
       </div>
       <div className="h-2 bg-[#1a1a24] rounded-full overflow-hidden">
         <div
           className="h-full rounded-full transition-all duration-500"
-          style={{ width: `${Math.min(percentage, 100)}%`, background: color }}
+          style={{ width: `${percentage}%`, background: color }}
         />
       </div>
     </div>
