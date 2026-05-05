@@ -1,27 +1,15 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   Sparkles,
-  Leaf,
-  MapPin,
-  Scale,
-  ChevronDown,
   Zap,
   Loader2,
+  Send,
+  Settings,
+  Key,
+  X,
+  RotateCcw,
 } from 'lucide-react';
-
-const feedstockOptions = [
-  { value: 'manure', label: 'Dairy Manure', icon: '🐄' },
-  { value: 'food_waste', label: 'Food Waste', icon: '🍎' },
-  { value: 'crop_residue', label: 'Crop Residue', icon: '🌾' },
-];
-
-const locationOptions = [
-  { value: 'Ohio, USA', label: 'Ohio, USA', flag: '🇺🇸' },
-  { value: 'California, USA', label: 'California, USA', flag: '🇺🇸' },
-  { value: 'Texas, USA', label: 'Texas, USA', flag: '🇺🇸' },
-  { value: 'Germany', label: 'Germany', flag: '🇩🇪' },
-  { value: 'India', label: 'India', flag: '🇮🇳' },
-];
+import { analyzeDesignPrompt, hasApiKey, setApiKey, clearApiKey, getApiKey } from '../services/aiService';
 
 export default function InputPanel({
   onGenerate,
@@ -29,157 +17,201 @@ export default function InputPanel({
   computingLog,
   currentLogIndex,
 }) {
-  const [prompt, setPrompt] = useState('Design a 50 ton/day plant for dairy waste');
-  const [capacity, setCapacity] = useState('50');
-  const [feedstock, setFeedstock] = useState('manure');
-  const [location, setLocation] = useState('Ohio, USA');
+  const [messages, setMessages] = useState([
+    {
+      role: 'assistant',
+      content: 'Welcome to BasisAI! Describe the biomethane plant you want to design. For example:\n\n"I want to build a 100 ton per day plant processing food waste in California"\n\nI\'ll help you specify the details and then generate the design.'
+    }
+  ]);
+  const [input, setInput] = useState('');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [keyConfigured, setKeyConfigured] = useState(hasApiKey());
+  const messagesEndRef = useRef(null);
 
-  const handleGenerate = () => {
-    onGenerate({ prompt, capacity, feedstock, location });
-  };
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
-  const extractCapacityFromPrompt = (text) => {
-    const match = text.match(/(\d+)\s*ton/i);
-    if (match) {
-      setCapacity(match[1]);
+  const handleSend = async () => {
+    if (!input.trim() || isAnalyzing || isGenerating) return;
+
+    const userMessage = { role: 'user', content: input.trim() };
+    const newMessages = [...messages, userMessage];
+    setMessages(newMessages);
+    setInput('');
+    setIsAnalyzing(true);
+
+    try {
+      const result = await analyzeDesignPrompt(newMessages);
+
+      if (result.type === 'complete') {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: `Perfect! I have all the details:\n\n• **Capacity:** ${result.parameters.capacity} tons/day\n• **Feedstock:** ${result.parameters.feedstock.replace('_', ' ')}\n• **Location:** ${result.parameters.location}\n\nGenerating your plant design now...`
+        }]);
+
+        setTimeout(() => {
+          onGenerate({
+            capacity: result.parameters.capacity,
+            feedstock: result.parameters.feedstock,
+            location: result.parameters.location
+          });
+        }, 500);
+      } else {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: result.message
+        }]);
+      }
+    } catch (err) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: `Error: ${err.message}`
+      }]);
+    } finally {
+      setIsAnalyzing(false);
     }
   };
 
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const handleSaveApiKey = () => {
+    if (apiKeyInput.trim()) {
+      setApiKey(apiKeyInput.trim());
+      setApiKeyInput('');
+      setShowSettings(false);
+      setKeyConfigured(true);
+    }
+  };
+
+  const handleClearApiKey = () => {
+    clearApiKey();
+    setKeyConfigured(false);
+  };
+
+  const handleReset = () => {
+    setMessages([
+      {
+        role: 'assistant',
+        content: 'Welcome to BasisAI! Describe the biomethane plant you want to design. For example:\n\n"I want to build a 100 ton per day plant processing food waste in California"\n\nI\'ll help you specify the details and then generate the design.'
+      }
+    ]);
+  };
+
   return (
-    <div className="w-80 h-full glass-panel border-r border-[#2a2a38] flex flex-col">
-      <div className="p-6 border-b border-[#2a2a38]">
-        <div className="flex items-center gap-3 mb-1">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#00d4ff] to-[#8b5cf6] flex items-center justify-center">
-            <Zap className="w-5 h-5 text-white" />
+    <div className="w-96 h-full glass-panel border-r border-[#2a2a38] flex flex-col">
+      {/* Header */}
+      <div className="p-4 border-b border-[#2a2a38]">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#00d4ff] to-[#8b5cf6] flex items-center justify-center">
+              <Zap className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-lg font-semibold text-white">BasisAI</h1>
+              <p className="text-xs text-[#6b7280]">Generative Design Engine</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-lg font-semibold text-white">BasisAI</h1>
-            <p className="text-xs text-[#6b7280]">Generative Design Engine</p>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={handleReset}
+              className="p-2 hover:bg-[#2a2a38] rounded-lg transition-colors"
+              title="New conversation"
+            >
+              <RotateCcw size={16} className="text-[#6b7280]" />
+            </button>
+            <button
+              onClick={() => setShowSettings(prev => !prev)}
+              className={`p-2 rounded-lg transition-colors ${showSettings ? 'bg-[#00d4ff]/20 text-[#00d4ff]' : 'hover:bg-[#2a2a38] text-[#6b7280]'}`}
+              title="API Settings"
+            >
+              <Settings size={16} />
+            </button>
           </div>
         </div>
+
+        {/* Settings Panel */}
+        {showSettings && (
+          <div className="mt-4 p-3 bg-[#0a0a0f] rounded-xl border border-[#2a2a38]">
+            <div className="flex items-center gap-2 mb-2">
+              <Key size={14} className="text-[#00d4ff]" />
+              <span className="text-xs font-medium text-white">Gemini API Key</span>
+            </div>
+            {keyConfigured ? (
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-[#00ff88]">Key configured</span>
+                <button
+                  onClick={handleClearApiKey}
+                  className="text-xs text-red-400 hover:text-red-300"
+                >
+                  Remove
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <input
+                  type="password"
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  placeholder="Enter API key..."
+                  className="flex-1 px-2 py-1.5 text-xs bg-[#1a1a24] border border-[#2a2a38] rounded-lg text-white"
+                />
+                <button
+                  onClick={handleSaveApiKey}
+                  className="px-3 py-1.5 text-xs bg-[#00d4ff] hover:bg-[#00b8e0] rounded-lg text-black font-medium"
+                >
+                  Save
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        <div>
-          <label className="flex items-center gap-2 text-sm font-medium text-[#9ca3af] mb-3">
-            <Sparkles className="w-4 h-4 text-[#00d4ff]" />
-            Design Prompt
-          </label>
-          <textarea
-            value={prompt}
-            onChange={(e) => {
-              setPrompt(e.target.value);
-              extractCapacityFromPrompt(e.target.value);
-            }}
-            placeholder="Describe your plant requirements..."
-            className="w-full h-24 px-4 py-3 bg-[#1a1a24] border border-[#2a2a38] rounded-xl text-sm text-white placeholder-[#4b5563] focus:outline-none focus:border-[#00d4ff] focus:ring-1 focus:ring-[#00d4ff]/20 resize-none transition-all"
-          />
-        </div>
-
-        <div>
-          <label className="flex items-center gap-2 text-sm font-medium text-[#9ca3af] mb-3">
-            <Scale className="w-4 h-4 text-[#00d4ff]" />
-            Plant Capacity
-          </label>
-          <div className="relative">
-            <input
-              type="number"
-              value={capacity}
-              onChange={(e) => setCapacity(e.target.value)}
-              className="w-full px-4 py-3 bg-[#1a1a24] border border-[#2a2a38] rounded-xl text-sm text-white focus:outline-none focus:border-[#00d4ff] focus:ring-1 focus:ring-[#00d4ff]/20 transition-all"
-            />
-            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-[#6b7280]">
-              tons/day
-            </span>
-          </div>
-          <div className="flex gap-2 mt-2">
-            {[25, 50, 100, 200].map((val) => (
-              <button
-                key={val}
-                onClick={() => setCapacity(String(val))}
-                className={`flex-1 py-1.5 text-xs rounded-lg border transition-all ${
-                  capacity === String(val)
-                    ? 'bg-[#00d4ff]/10 border-[#00d4ff] text-[#00d4ff]'
-                    : 'border-[#2a2a38] text-[#6b7280] hover:border-[#3a3a48]'
-                }`}
-              >
-                {val}T
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <label className="flex items-center gap-2 text-sm font-medium text-[#9ca3af] mb-3">
-            <Leaf className="w-4 h-4 text-[#00ff88]" />
-            Feedstock Type
-          </label>
-          <div className="relative">
-            <select
-              value={feedstock}
-              onChange={(e) => setFeedstock(e.target.value)}
-              className="w-full px-4 py-3 bg-[#1a1a24] border border-[#2a2a38] rounded-xl text-sm text-white appearance-none focus:outline-none focus:border-[#00d4ff] focus:ring-1 focus:ring-[#00d4ff]/20 transition-all cursor-pointer"
-            >
-              {feedstockOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.icon} {opt.label}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6b7280] pointer-events-none" />
-          </div>
-        </div>
-
-        <div>
-          <label className="flex items-center gap-2 text-sm font-medium text-[#9ca3af] mb-3">
-            <MapPin className="w-4 h-4 text-[#ff8800]" />
-            Project Location
-          </label>
-          <div className="relative">
-            <select
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              className="w-full px-4 py-3 bg-[#1a1a24] border border-[#2a2a38] rounded-xl text-sm text-white appearance-none focus:outline-none focus:border-[#00d4ff] focus:ring-1 focus:ring-[#00d4ff]/20 transition-all cursor-pointer"
-            >
-              {locationOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.flag} {opt.label}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-[#6b7280] pointer-events-none" />
-          </div>
-        </div>
-
-        <div className="pt-2">
-          <button
-            onClick={handleGenerate}
-            disabled={isGenerating}
-            className={`w-full py-4 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all ${
-              isGenerating
-                ? 'bg-[#1a1a24] border border-[#00d4ff] text-[#00d4ff]'
-                : 'bg-gradient-to-r from-[#00d4ff] to-[#8b5cf6] text-white hover:opacity-90 animate-pulse-glow'
-            }`}
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {messages.map((msg, i) => (
+          <div
+            key={i}
+            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
           >
-            {isGenerating ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Generating Design...
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-4 h-4" />
-                Generate Design
-              </>
-            )}
-          </button>
-        </div>
+            <div
+              className={`max-w-[85%] px-3 py-2 rounded-xl text-sm whitespace-pre-wrap ${
+                msg.role === 'user'
+                  ? 'bg-[#00d4ff] text-black'
+                  : 'bg-[#1a1a24] text-[#e5e7eb] border border-[#2a2a38]'
+              }`}
+            >
+              {msg.content.split(/(\*\*.*?\*\*)/).map((part, j) => {
+                if (part.startsWith('**') && part.endsWith('**')) {
+                  return <strong key={j}>{part.slice(2, -2)}</strong>;
+                }
+                return part;
+              })}
+            </div>
+          </div>
+        ))}
+
+        {isAnalyzing && (
+          <div className="flex justify-start">
+            <div className="bg-[#1a1a24] border border-[#2a2a38] px-3 py-2 rounded-xl">
+              <Loader2 size={16} className="animate-spin text-[#00d4ff]" />
+            </div>
+          </div>
+        )}
 
         {isGenerating && (
           <div className="bg-[#0a0a0f] rounded-xl border border-[#2a2a38] p-4">
             <div className="flex items-center gap-2 mb-3">
               <div className="w-2 h-2 rounded-full bg-[#00ff88] animate-pulse" />
-              <span className="text-xs font-medium text-[#00ff88]">AI Computing</span>
+              <span className="text-xs font-medium text-[#00ff88]">Generating Design</span>
             </div>
             <div className="h-32 overflow-hidden font-mono text-xs">
               {computingLog.slice(0, currentLogIndex + 1).map((log, i) => (
@@ -202,14 +234,51 @@ export default function InputPanel({
             </div>
           </div>
         )}
+
+        <div ref={messagesEndRef} />
       </div>
 
+      {/* Input */}
       <div className="p-4 border-t border-[#2a2a38]">
+        {!keyConfigured ? (
+          <div className="text-center py-2">
+            <p className="text-xs text-[#6b7280] mb-2">Configure your Gemini API key to start</p>
+            <button
+              onClick={() => setShowSettings(true)}
+              className="px-4 py-2 text-xs bg-[#00d4ff] hover:bg-[#00b8e0] rounded-lg text-black font-medium"
+            >
+              Add API Key
+            </button>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Describe your plant design..."
+              disabled={isAnalyzing || isGenerating}
+              rows={2}
+              className="flex-1 px-3 py-2 bg-[#1a1a24] border border-[#2a2a38] rounded-xl text-sm text-white placeholder-[#4b5563] resize-none focus:outline-none focus:border-[#00d4ff] disabled:opacity-50"
+            />
+            <button
+              onClick={handleSend}
+              disabled={isAnalyzing || isGenerating || !input.trim()}
+              className="px-3 self-end py-2 bg-gradient-to-r from-[#00d4ff] to-[#8b5cf6] hover:opacity-90 disabled:opacity-50 rounded-xl text-white transition-all"
+            >
+              <Send size={18} />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className="px-4 py-2 border-t border-[#2a2a38]">
         <div className="flex items-center justify-between text-xs text-[#4b5563]">
-          <span>v2.4.1</span>
+          <span>v2.5.0</span>
           <span className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-[#00ff88]" />
-            Engine Ready
+            <span className={`w-2 h-2 rounded-full ${keyConfigured ? 'bg-[#00ff88]' : 'bg-[#6b7280]'}`} />
+            {keyConfigured ? 'AI Ready' : 'API Key Required'}
           </span>
         </div>
       </div>

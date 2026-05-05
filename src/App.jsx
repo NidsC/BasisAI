@@ -5,6 +5,7 @@ import EquipmentCard from './components/EquipmentCard';
 import FinancialSummary from './components/FinancialSummary';
 import MassEnergyBalance from './components/MassEnergyBalance';
 import Header from './components/Header';
+import ChatWidget from './components/chat/ChatWidget';
 import { calculatePlantDesign, computingLogs } from './data/demoData';
 
 export default function App() {
@@ -130,6 +131,8 @@ export default function App() {
           onClose={() => setShowBalanceModal(false)}
         />
       )}
+
+      <ChatWidget plantData={plantData} />
 
       <footer className="h-8 glass-panel border-t border-[#2a2a38] flex items-center justify-between px-6 text-xs text-[#4b5563]">
         <div className="flex items-center gap-4">
